@@ -1,51 +1,142 @@
 name: Build RSDKv4+ iOS
-on: [workflow_dispatch, push]
+
+on:
+  workflow_dispatch:
+  push:
 
 jobs:
   build:
     runs-on: macos-latest
+    timeout-minutes: 60
+
     steps:
+      # 1. Get the RSDKModding/RSDKv4-Decompilation source (with submodules)
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           submodules: recursive
 
-      - name: Prepare iOS Build & Headers
+      # 2. Stub OpenGL headers + empty Data.rsdk placeholder
+      - name: Prepare headers and placeholder
         run: |
-          mkdir -p dependencies/ios/OpenGL
+          mkdir -p dependencies/ios/OpenGL deps
           touch dependencies/ios/Data.rsdk
-          cat << 'EOF' > dependencies/ios/OpenGL/gl.h
-          #pragma once
-          #include <OpenGLES/ES2/gl.h>
-          typedef double GLdouble;
-          EOF
-          cat << 'EOF' > dependencies/ios/OpenGL/glext.h
-          #pragma once
-          #include <OpenGLES/ES2/glext.h>
-          EOF
+          printf '#pragma once\n#include <OpenGLES/ES2/gl.h>\ntypedef double GLdouble;\n' > dependencies/ios/OpenGL/gl.h
+          printf '#pragma once\n#include <OpenGLES/ES2/glext.h>\n' > dependencies/ios/OpenGL/glext.h
 
-      - name: Build Xcode Project
+      # 3. SDL2.framework for iOS
+      - name: Build SDL2 framework
+        run: |
+          git clone --depth 1 --branch release-2.30.9 https://github.com/libsdl-org/SDL deps/SDL
+          xcodebuild -list -project deps/SDL/Xcode/SDL/SDL.xcodeproj || true
+
+          for SCHEME in "xcFramework-iOS" "xcFramework"; do
+            echo "=== Trying scheme: $SCHEME ==="
+            xcodebuild -project deps/SDL/Xcode/SDL/SDL.xcodeproj \
+              -scheme "$SCHEME" \
+              -configuration Release \
+              -derivedDataPath deps/sdlbuild \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+              > "deps/sdl_$SCHEME.log" 2>&1 && break || tail -30 "deps/sdl_$SCHEME.log"
+          done
+
+          FW=$(find deps/sdlbuild deps/SDL -type d -name "SDL2.framework" -path "*ios*" -not -path "*simulator*" | head -n 1)
+          if [ -z "$FW" ]; then
+            echo "::error::Could not find an iOS SDL2.framework"
+            find deps -name "*.framework" -o -name "*.xcframework" | head -50
+            exit 1
+          fi
+          echo "Using $FW"
+          cp -R "$FW" dependencies/ios/
+
+      # 4. Ogg + Vorbis frameworks for iOS
+      - name: Build Ogg and Vorbis frameworks
+        run: |
+          git clone --depth 1 https://github.com/xiph/ogg deps/ogg
+          git clone --depth 1 https://github.com/xiph/vorbis deps/vorbis
+          PREFIX="$PWD/deps/prefix"
+
+          IOS_FLAGS="-G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DBUILD_FRAMEWORK=ON \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
+            -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_PREFIX_PATH=$PREFIX \
+            -DBUILD_TESTING=OFF -DINSTALL_DOCS=OFF"
+
+          cmake -S deps/ogg -B deps/ogg/b $IOS_FLAGS
+          cmake --build deps/ogg/b --config Release
+          cmake --install deps/ogg/b --config Release
+
+          cmake -S deps/vorbis -B deps/vorbis/b $IOS_FLAGS
+          cmake --build deps/vorbis/b --config Release
+          cmake --install deps/vorbis/b --config Release
+
+          for NAME in Ogg Vorbis; do
+            FW=$(find deps -type d -iname "$NAME.framework" | head -n 1)
+            if [ -z "$FW" ]; then
+              echo "::warning::$NAME.framework not found"
+            else
+              echo "Using $FW"
+              cp -R "$FW" dependencies/ios/
+            fi
+          done
+          echo "--- dependencies/ios ---"
+          ls -la dependencies/ios
+
+      # 5. Fail early if anything required is missing
+      - name: Verify dependencies
+        run: |
+          for F in SDL2 Ogg Vorbis; do
+            if [ ! -d "dependencies/ios/$F.framework" ]; then
+              echo "::error::Missing dependencies/ios/$F.framework"
+              MISSING=1
+            fi
+          done
+          [ -z "$MISSING" ] || exit 1
+          xcodebuild -list -project "RSDKv4 ios.xcodeproj"
+
+      # 6. Build the app (Plus is enabled by default; do NOT distribute this build)
+      - name: Build Xcode project
         run: |
           set -o pipefail
           xcodebuild -project "RSDKv4 ios.xcodeproj" \
             -scheme "RSDKv4" \
             -configuration Release \
             -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
             -derivedDataPath build \
-            HEADER_SEARCH_PATHS="\$(inherited) \$(PROJECT_DIR)/dependencies/ios" \
+            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
+            HEADER_SEARCH_PATHS='$(inherited) $(PROJECT_DIR)/dependencies/ios' \
+            FRAMEWORK_SEARCH_PATHS='$(inherited) $(PROJECT_DIR)/dependencies/ios' \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:|FAILED|succeeded" -C 2
+            CODE_SIGNING_ALLOWED=NO 2>&1 | tee build.log
 
+      - name: Show errors
+        if: failure()
+        run: grep -E "error:" -B2 -A2 build.log | head -150
+
+      # 7. Package unsigned IPA
       - name: Package IPA
         run: |
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          if [ -z "$APP_PATH" ]; then echo "::error::No .app produced"; exit 1; fi
           mkdir -p Payload
-          APP_PATH=$(find build -name "*.app" | head -n 1)
-          cp -r "$APP_PATH" Payload/
-          zip -r RSDKv4Plus.ipa Payload
+          cp -R "$APP_PATH" Payload/
+          zip -qr RSDKv4Plus.ipa Payload
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
         with:
           name: RSDKv4Plus-iOS
           path: RSDKv4Plus.ipa
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: |
+            build.log
+            deps/*.log
+          if-no-files-found: ignore
