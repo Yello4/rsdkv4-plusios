@@ -10,10 +10,16 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Create Placeholders
+      - name: Create Placeholders & Patch iOS OpenGL
         run: |
           mkdir -p dependencies/ios
           touch dependencies/ios/Data.rsdk
+          python3 -c '
+          p = "RSDKv4/RetroEngine.hpp"
+          txt = open(p).read()
+          txt = txt.replace("#include <OpenGL/gl.h>", "#if !TARGET_OS_IPHONE\n#include <OpenGL/gl.h>\n#endif")
+          open(p, "w").write(txt)
+          '
 
       - name: Build Xcode Project
         run: |
