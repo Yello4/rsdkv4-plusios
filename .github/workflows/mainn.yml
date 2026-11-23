@@ -49,30 +49,37 @@ jobs:
           echo "Using $FW"
           cp -R "$FW" dependencies/ios/
 
-      # 4. Ogg + Vorbis frameworks for iOS
-      - name: Build Ogg and Vorbis frameworks
+      # 4. Ogg + Vorbis frameworks for       - name: Build Ogg and Vorbis frameworks
         run: |
           git clone --depth 1 https://github.com/xiph/ogg deps/ogg
           git clone --depth 1 https://github.com/xiph/vorbis deps/vorbis
           PREFIX="$PWD/deps/prefix"
 
-          IOS_FLAGS="-G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 \
-            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 -DBUILD_FRAMEWORK=ON \
+          COMMON="-G Xcode -DCMAKE_SYSTEM_NAME=iOS -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=12.0 \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
             -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
-            -DCMAKE_INSTALL_PREFIX=$PREFIX -DCMAKE_PREFIX_PATH=$PREFIX \
             -DBUILD_TESTING=OFF -DINSTALL_DOCS=OFF"
 
-          cmake -S deps/ogg -B deps/ogg/b $IOS_FLAGS
-          cmake --build deps/ogg/b --config Release
-          cmake --install deps/ogg/b --config Release
+          # Ogg as static lib (so Vorbis can find it)
+          cmake -S deps/ogg -B deps/ogg/bs $COMMON -DBUILD_FRAMEWORK=OFF \
+            -DBUILD_SHARED_LIBS=OFF -DCMAKE_INSTALL_PREFIX=$PREFIX
+          cmake --build deps/ogg/bs --config Release
+          cmake --install deps/ogg/bs --config Release
+          ls -R $PREFIX | head -30
 
-          cmake -S deps/vorbis -B deps/vorbis/b $IOS_FLAGS
-          cmake --build deps/vorbis/b --config Release
-          cmake --install deps/vorbis/b --config Release
+          # Ogg as framework (for the app)
+          cmake -S deps/ogg -B deps/ogg/bf $COMMON -DBUILD_FRAMEWORK=ON
+          cmake --build deps/ogg/bf --config Release
+
+          # Vorbis as framework, pointed at the static Ogg
+          cmake -S deps/vorbis -B deps/vorbis/bf $COMMON -DBUILD_FRAMEWORK=ON \
+            -DOGG_INCLUDE_DIR=$PREFIX/include \
+            -DOGG_LIBRARY=$PREFIX/lib/libogg.a
+          cmake --build deps/vorbis/bf --config Release
 
           for NAME in Ogg Vorbis; do
-            FW=$(find deps -type d -iname "$NAME.framework" | head -n 1)
+            FW=$(find deps/ogg/bf deps/vorbis/bf -type d -iname "$NAME.framework" | head -n 1)
             if [ -z "$FW" ]; then
               echo "::warning::$NAME.framework not found"
             else
@@ -80,7 +87,6 @@ jobs:
               cp -R "$FW" dependencies/ios/
             fi
           done
-          echo "--- dependencies/ios ---"
           ls -la dependencies/ios
 
       # 5. Fail early if anything required is missing
