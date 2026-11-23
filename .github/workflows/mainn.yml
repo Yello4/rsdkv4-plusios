@@ -10,17 +10,19 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Create Placeholders & Patch iOS OpenGL
+      - name: Prepare iOS Build & Headers
         run: |
-          mkdir -p dependencies/ios
+          mkdir -p dependencies/ios/OpenGL
           touch dependencies/ios/Data.rsdk
-          python3 -c '
-          p = "RSDKv4/RetroEngine.hpp"
-          txt = open(p).read()
-          txt = txt.replace("#include <OpenGL/gl.h>", "#if !TARGET_OS_IPHONE\n#include <OpenGL/gl.h>\n#endif")
-          txt = txt.replace("#include <OpenGL/glext.h>", "#if !TARGET_OS_IPHONE\n#include <OpenGL/glext.h>\n#endif")
-          open(p, "w").write(txt)
-          '
+          cat << 'EOF' > dependencies/ios/OpenGL/gl.h
+          #pragma once
+          #include <OpenGLES/ES2/gl.h>
+          typedef double GLdouble;
+          EOF
+          cat << 'EOF' > dependencies/ios/OpenGL/glext.h
+          #pragma once
+          #include <OpenGLES/ES2/glext.h>
+          EOF
 
       - name: Build Xcode Project
         run: |
@@ -30,9 +32,10 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
+            HEADER_SEARCH_PATHS="\$(inherited) \$(PROJECT_DIR)/dependencies/ios" \
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:|FAILED|CpResource" -C 2
+            CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:|FAILED|succeeded" -C 2
 
       - name: Package IPA
         run: |
