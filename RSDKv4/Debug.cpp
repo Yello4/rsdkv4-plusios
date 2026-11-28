@@ -7,6 +7,17 @@ int taListStore = 0;
 
 void PrintLog(const char *msg, ...)
 {
+#if RETRO_PLATFORM == RETRO_iOS
+    {
+        // iOS has no console: always copy log lines into Documents/log.txt
+        char iosBuffer[0x400];
+        va_list iosArgs;
+        va_start(iosArgs, msg);
+        vsnprintf(iosBuffer, sizeof(iosBuffer), msg, iosArgs);
+        va_end(iosArgs);
+        iOSLogWrite(iosBuffer);
+    }
+#endif
 #ifndef RETRO_DISABLE_LOG
     if (engineDebugMode || Engine.consoleEnabled) {
         char buffer[0x100];

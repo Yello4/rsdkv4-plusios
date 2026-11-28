@@ -220,7 +220,7 @@ int ProcessVideo()
             videoSkipped = true;
         }
 
-#if RETRO_PLATFORM == RETRO_ANDROID
+#if RETRO_PLATFORM == RETRO_ANDROID || RETRO_PLATFORM == RETRO_iOS
         if (touches > 0) {
             if (!videoSkipped)
                 fadeMode = 0;

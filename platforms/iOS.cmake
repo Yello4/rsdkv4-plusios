@@ -9,7 +9,7 @@
 #   dependencies/ios/libtheora   libtheora source
 #   SDL2 built for iOS as a static library and installed somewhere SDL2_DIR points at
 #
-# No game data is bundled. The app reads Data.rsdk (and writes settings/saves) from its
+# No game data is bundled. The app reads Data.rsdk (and writes settings/saves/log.txt) from its
 # Documents folder, which is exposed in the Files app (UIFileSharingEnabled).
 
 set(DEP_PATH ios)
@@ -20,7 +20,11 @@ endif()
 
 # iOS-specific overrides
 set(RETRO_SDL_VERSION 2)
-set(RETRO_USE_HW_RENDER OFF) # present through SDL_Renderer (Metal/GLES), no desktop OpenGL on iOS
+# Hardware renderer through OpenGL ES 1.1 (like the Android port). It draws the mobile menus, the pause menu and the
+# on-screen touch controls; without it the mobile Data.rsdk has no visible touch controls.
+set(RETRO_USE_HW_RENDER ON)
+# The iPhone file system is case-sensitive; the Files app makes it easy to end up with data.rsdk / DATA.RSDK etc.
+set(RETRO_FORCE_CASE_INSENSITIVE ON)
 set(RETRO_USE_STEAM OFF)
 set(RETRO_USE_DISCORD OFF)
 set(RETRO_UPDATE_CHECKER OFF)

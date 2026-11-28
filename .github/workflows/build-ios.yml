@@ -140,9 +140,13 @@ jobs:
           prerelease: true
           body: |
             Unsigned iOS build of RSDKv4+ for sideloading.
-            1. Download RSDKv4.ipa and install it with AltStore, SideStore or Sideloadly.
-            2. Open the app once, then in Files go to On My iPhone > RSDKv4+.
-            3. Copy in your own Data.rsdk (no game data is included) and reopen the app.
+
+            **Step-by-step guide (no Mac needed):** https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/iOS-GUIDE.md
+
+            1. Download RSDKv4.ipa and install it with Sideloadly, AltStore or SideStore.
+            2. Open the app once (it tells you no data was found and closes), then in Files go to On My iPhone > RSDKv4+.
+            3. Copy in your own Data.rsdk from the 2013 mobile Sonic 1 or Sonic 2 (no game data is included; Sonic Origins data won't work) and reopen the app.
+            4. If something goes wrong, the app writes log.txt in that same folder.
 
       - name: Upload build log
         if: always()

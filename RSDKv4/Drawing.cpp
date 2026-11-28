@@ -39,6 +39,13 @@ bool mixFiltersOnJekyll = false;
 
 #if RETRO_USING_OPENGL
 GLint defaultFramebuffer = -1;
+#if RETRO_PLATFORM == RETRO_iOS
+// SDL's UIKit view renders into its own framebuffer object, not 0
+static GLint iosScreenFramebuffer = 0;
+#define RETRO_SCREEN_FRAMEBUFFER ((GLuint)iosScreenFramebuffer)
+#else
+#define RETRO_SCREEN_FRAMEBUFFER (0)
+#endif
 GLuint framebufferHiRes  = -1;
 GLuint renderbufferHiRes = -1;
 GLuint videoBuffer       = -1;
@@ -80,7 +87,7 @@ int InitRenderDevice()
     flags |= SDL_WINDOW_OPENGL;
 
 #if RETRO_PLATFORM != RETRO_OSX // dude idk either you just gotta trust that this works
-#if RETRO_PLATFORM != RETRO_ANDROID
+#if RETRO_PLATFORM != RETRO_ANDROID && RETRO_PLATFORM != RETRO_iOS
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 #else
     SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
@@ -107,11 +114,18 @@ int InitRenderDevice()
 #endif
 
     SCREEN_CENTERX = SCREEN_XSIZE / 2;
+#if RETRO_PLATFORM == RETRO_iOS
+    // No HIGHDPI on iOS: the GL drawable then matches the window size in points, which keeps the viewport maths simple.
+    // The game is 240 lines tall, so a Retina-sized framebuffer gains nothing.
+    Engine.window = SDL_CreateWindow(gameTitle, SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_XSIZE * Engine.windowScale,
+                                     SCREEN_YSIZE * Engine.windowScale, SDL_WINDOW_FULLSCREEN | SDL_WINDOW_BORDERLESS | flags);
+#else
     Engine.window  = SDL_CreateWindow(gameTitle, SDL_WINDOWPOS_CENTERED_DISPLAY(CURRENT_DISP_SCREEN), SDL_WINDOWPOS_CENTERED_DISPLAY(CURRENT_DISP_SCREEN), SCREEN_XSIZE * Engine.windowScale,
                                      SCREEN_YSIZE * Engine.windowScale, SDL_WINDOW_ALLOW_HIGHDPI | flags);
+#endif
 
     if (!Engine.window) {
-        PrintLog("ERROR: failed to create window!");
+        PrintLog("ERROR: failed to create window! %s", SDL_GetError());
         return 0;
     }
 
@@ -209,13 +223,29 @@ int InitRenderDevice()
 
     // Init GL
     Engine.glContext = SDL_GL_CreateContext(Engine.window);
+#if RETRO_PLATFORM == RETRO_iOS
+    if (!Engine.glContext) {
+        PrintLog("ERROR: failed to create OpenGL ES context! %s", SDL_GetError());
+        return 0;
+    }
+    SDL_GL_MakeCurrent(Engine.window, Engine.glContext);
+    // On iOS the screen is NOT framebuffer 0: SDL makes its own framebuffer for the view. Remember it.
+    glGetIntegerv(GL_FRAMEBUFFER_BINDING, &iosScreenFramebuffer);
+    defaultFramebuffer = iosScreenFramebuffer;
+    {
+        int dw = 0, dh = 0;
+        SDL_GL_GetDrawableSize(Engine.window, &dw, &dh);
+        PrintLog("GL: %s / %s, screen framebuffer %d, drawable %dx%d", (const char *)glGetString(GL_RENDERER), (const char *)glGetString(GL_VERSION),
+                 (int)iosScreenFramebuffer, dw, dh);
+    }
+#endif
 
     SDL_GL_SetSwapInterval(Engine.vsync ? 1 : 0);
 
 #if RETRO_PLATFORM == RETRO_SWITCH
     // Should probably add error
     gladLoadGL();
-#elif RETRO_PLATFORM != RETRO_ANDROID && RETRO_PLATFORM != RETRO_OSX
+#elif RETRO_PLATFORM != RETRO_ANDROID && RETRO_PLATFORM != RETRO_OSX && RETRO_PLATFORM != RETRO_iOS
     GLenum err = glewInit();
     if (err != GLEW_OK) {
         PrintLog("glew init error:");
@@ -239,7 +269,7 @@ int InitRenderDevice()
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
 
-#if RETRO_PLATFORM == RETRO_ANDROID
+#if RETRO_PLATFORM == RETRO_ANDROID || RETRO_PLATFORM == RETRO_iOS
     Engine.windowScale     = 1;
     displaySettings.width  = SCREEN_XSIZE;
     displaySettings.height = SCREEN_YSIZE;
@@ -270,12 +300,12 @@ int InitRenderDevice()
     glLightfv(GL_LIGHT0, GL_POSITION, lightPos);
     glEnable(GL_LIGHT0);
 
-#if RETRO_PLATFORM == RETRO_ANDROID
+#if RETRO_PLATFORM == RETRO_ANDROID || RETRO_PLATFORM == RETRO_iOS
     Engine.startFullScreen = true;
 #endif
 #endif
 
-#if RETRO_PLATFORM != RETRO_ANDROID
+#if RETRO_PLATFORM != RETRO_ANDROID && RETRO_PLATFORM != RETRO_iOS
     SetScreenDimensions(SCREEN_XSIZE_CONFIG * Engine.windowScale, SCREEN_YSIZE * Engine.windowScale);
 #else
     SetScreenDimensions(SCREEN_XSIZE, SCREEN_YSIZE);
@@ -660,7 +690,7 @@ void FlipScreenVideo()
     glPushMatrix();
     glLoadIdentity();
 
-#if RETRO_PLATFORM == RETRO_ANDROID || RETRO_PLATFORM == RETRO_SWITCH
+#if RETRO_PLATFORM == RETRO_ANDROID || RETRO_PLATFORM == RETRO_SWITCH || RETRO_PLATFORM == RETRO_iOS
     glOrthof(0.0f, (float)SCREEN_XSIZE, (float)SCREEN_YSIZE, 0.0f, -1.0f, 1.0f);
 #else
     glOrtho(0.0, (double)SCREEN_XSIZE, (double)SCREEN_YSIZE, 0.0, -1.0, 1.0);
@@ -1144,7 +1174,7 @@ void SetupViewport()
         glTexParameterf(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, texWidth << 1, texHeight << 1, 0, GL_RGB, GL_UNSIGNED_SHORT_5_6_5, 0);
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, renderbufferHiRes, 0);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, RETRO_SCREEN_FRAMEBUFFER);
         glBindTexture(GL_TEXTURE_2D, 0);
 #endif
 
@@ -1177,7 +1207,7 @@ void SetupViewport()
             glDeleteFramebuffers(1, &framebufferHiRes);
         if (renderbufferHiRes != -1)
             glDeleteTextures(1, &renderbufferHiRes);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glBindFramebuffer(GL_FRAMEBUFFER, RETRO_SCREEN_FRAMEBUFFER);
 
         framebufferHiRes  = -1;
         renderbufferHiRes = -1;
@@ -1280,6 +1310,12 @@ void SetFullScreen(bool fs)
 
         int w = mode.w;
         int h = mode.h;
+#if RETRO_PLATFORM == RETRO_iOS
+        // the real size of what GL draws into
+        SDL_GL_GetDrawableSize(Engine.window, &w, &h);
+        mode.w = w;
+        mode.h = h;
+#endif
         if (mode.h > mode.w) {
             w = mode.h;
             h = mode.w;
