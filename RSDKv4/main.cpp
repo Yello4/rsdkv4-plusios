@@ -48,6 +48,23 @@ void parseArguments(int argc, char *argv[])
 }
 #endif
 
+#if RETRO_PLATFORM == RETRO_iOS
+#include <stdlib.h>
+#include <stdio.h>
+#include <unistd.h>
+
+const char *getDocumentsPath()
+{
+    static char documentsPath[0x200] = { 0 };
+    if (!documentsPath[0]) {
+        // $HOME is the app's sandbox container on iOS
+        const char *home = getenv("HOME");
+        snprintf(documentsPath, sizeof(documentsPath), "%s/Documents", home ? home : ".");
+    }
+    return documentsPath;
+}
+#endif
+
 #if RETRO_PLATFORM == RETRO_SWITCH
 #include <switch.h>
 #include <stdlib.h>
@@ -77,6 +94,12 @@ int main(int argc, char *argv[])
 {
 #if RETRO_PLATFORM == RETRO_SWITCH
     initNxLink();
+#endif
+
+#if RETRO_PLATFORM == RETRO_iOS
+    // Work out of the app's Documents folder so relative paths (Data.rsdk, settings.ini, saves, mods) resolve there.
+    // With UIFileSharingEnabled this folder shows up in the Files app under "On My iPhone".
+    chdir(getDocumentsPath());
 #endif
 
 #if !RETRO_USE_ORIGINAL_CODE

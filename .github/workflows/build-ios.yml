@@ -1,0 +1,136 @@
+name: Build iOS IPA (unsigned)
+
+# Builds an UNSIGNED .ipa for sideloading (AltStore / SideStore / Sideloadly re-sign it with your Apple ID).
+# No game data is bundled: put your own Data.rsdk in the app's folder via the Files app.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, fix-ios-ipa]
+    paths:
+      - RSDKv4/**
+      - dependencies/ios/**
+      - dependencies/all/**
+      - platforms/**
+      - CMakeLists.txt
+      - .github/workflows/build-ios.yml
+  pull_request:
+    branches: [main]
+
+env:
+  SDL2_VERSION: "2.30.9"
+  OGG_VERSION: "1.3.5"
+  VORBIS_VERSION: "1.3.7"
+  THEORA_VERSION: "1.1.1"
+  IOS_DEPLOYMENT_TARGET: "13.0"
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Toolchain info
+        run: |
+          xcodebuild -version
+          cmake --version
+          xcrun --sdk iphoneos --show-sdk-version
+
+      - name: Fetch libogg / libvorbis / libtheora sources
+        run: |
+          set -euo pipefail
+          fetch() { # name version
+            for base in https://ftp.osuosl.org/pub/xiph/releases https://downloads.xiph.org/releases; do
+              if curl -fsSL --retry 3 "$base/$1/lib$1-$2.tar.gz" -o "$RUNNER_TEMP/lib$1.tar.gz"; then
+                tar xzf "$RUNNER_TEMP/lib$1.tar.gz" -C dependencies/ios
+                mv "dependencies/ios/lib$1-$2" "dependencies/ios/lib$1"
+                return 0
+              fi
+            done
+            echo "::error::Could not download lib$1-$2"; return 1
+          }
+          fetch ogg "$OGG_VERSION"
+          fetch vorbis "$VORBIS_VERSION"
+          fetch theora "$THEORA_VERSION"
+          cp dependencies/android/config_types.h dependencies/ios/libogg/include/ogg/config_types.h
+          ls dependencies/ios
+
+      - name: Build SDL2 (static library for iOS arm64)
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 "https://github.com/libsdl-org/SDL/releases/download/release-$SDL2_VERSION/SDL2-$SDL2_VERSION.tar.gz" | tar xz -C "$RUNNER_TEMP"
+          cmake -S "$RUNNER_TEMP/SDL2-$SDL2_VERSION" -B "$RUNNER_TEMP/sdl2-build" \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$RUNNER_TEMP/sdl2-ios" \
+            -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TEST=OFF
+          cmake --build "$RUNNER_TEMP/sdl2-build" --config Release -j "$(sysctl -n hw.ncpu)"
+          cmake --install "$RUNNER_TEMP/sdl2-build" --config Release
+          ls -R "$RUNNER_TEMP/sdl2-ios/lib"
+
+      - name: Configure (CMake, Xcode generator)
+        run: |
+          cmake -S . -B build-ios -G Xcode \
+            -DCMAKE_SYSTEM_NAME=iOS \
+            -DCMAKE_OSX_ARCHITECTURES=arm64 \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET="$IOS_DEPLOYMENT_TARGET" \
+            -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+            -DSDL2_DIR="$RUNNER_TEMP/sdl2-ios/lib/cmake/SDL2" \
+            -DRETRO_OUTPUT_NAME=RSDKv4 \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_ALLOWED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGNING_REQUIRED=NO \
+            -DCMAKE_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY=""
+
+      - name: Build app (unsigned)
+        run: |
+          set -o pipefail
+          cmake --build build-ios --config Release --target RetroEngine -- \
+            -sdk iphoneos \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            2>&1 | tee build-ios.log
+
+      - name: Show build errors
+        if: failure()
+        run: |
+          grep -E "error:|ld: |Undefined symbols|\*\* BUILD FAILED" -A3 build-ios.log | head -200 || true
+
+      - name: Package unsigned IPA
+        run: |
+          set -euo pipefail
+          APP_PATH=$(find build-ios -type d -name "*.app" -path "*Release-iphoneos*" | head -n 1)
+          if [ -z "$APP_PATH" ]; then echo "::error::No .app was produced"; exit 1; fi
+          echo "App bundle: $APP_PATH"
+          ls -la "$APP_PATH"
+          # never ship game data
+          if find "$APP_PATH" -iname "*.rsdk" | grep -q .; then echo "::error::Game data found inside the app bundle"; exit 1; fi
+          plutil -p "$APP_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :UIFileSharingEnabled" "$APP_PATH/Info.plist"
+          /usr/libexec/PlistBuddy -c "Print :LSSupportsOpeningDocumentsInPlace" "$APP_PATH/Info.plist"
+          EXE=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$APP_PATH/Info.plist")
+          file "$APP_PATH/$EXE"
+          mkdir -p ipa/Payload
+          cp -R "$APP_PATH" ipa/Payload/
+          (cd ipa && zip -qry ../RSDKv4.ipa Payload)
+          ls -la RSDKv4.ipa
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: RSDKv4-iOS-unsigned-ipa
+          path: RSDKv4.ipa
+          if-no-files-found: error
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-ios-log
+          path: build-ios.log
+          if-no-files-found: ignore

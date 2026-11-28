@@ -82,7 +82,8 @@ bool getControllerButton(byte buttonID, int deviceID);
 #endif
 
 #elif defined __APPLE__
-#if __IPHONEOS__
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE || defined(__IPHONEOS__)
 #define RETRO_PLATFORM   (RETRO_iOS)
 #define RETRO_DEVICETYPE (RETRO_MOBILE)
 #else
@@ -119,7 +120,7 @@ bool getControllerButton(byte buttonID, int deviceID);
 #endif
 
 #if RETRO_PLATFORM == RETRO_WIN || RETRO_PLATFORM == RETRO_OSX || RETRO_PLATFORM == RETRO_LINUX || RETRO_PLATFORM == RETRO_UWP                       \
-    || RETRO_PLATFORM == RETRO_ANDROID || RETRO_PLATFORM == RETRO_SWITCH
+    || RETRO_PLATFORM == RETRO_ANDROID || RETRO_PLATFORM == RETRO_SWITCH || RETRO_PLATFORM == RETRO_iOS
 #ifdef RETRO_USE_SDL2
 #define RETRO_USING_SDL1 (0)
 #define RETRO_USING_SDL2 (1)
@@ -335,6 +336,13 @@ enum RetroGameType {
 #include <Vorbis/vorbisfile.h>
 
 #include "cocoaHelpers.hpp"
+
+#elif RETRO_PLATFORM == RETRO_iOS
+#include <SDL.h>
+#include <vorbis/vorbisfile.h>
+
+// The app's Documents folder (visible in the Files app). Data.rsdk, settings, saves & mods live here.
+const char *getDocumentsPath();
 
 #elif RETRO_USING_SDL2
 #include <SDL2/SDL.h>

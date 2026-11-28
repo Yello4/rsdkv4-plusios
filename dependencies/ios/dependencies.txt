@@ -7,3 +7,12 @@ Download the source and create an Xcode project to build the library as a framew
 
 libvorbis: https://xiph.org/downloads/ (libvorbis)
 Download the source and create an Xcode project to build the library as a framework, once the framework is built (vorbis.framework), place it in ./
+---------------------------------------------------------------------------
+CMake / GitHub Actions build (no Mac needed)
+---------------------------------------------------------------------------
+.github/workflows/build-ios.yml builds an unsigned RSDKv4.ipa on a macOS runner:
+it downloads libogg, libvorbis and libtheora into this folder, builds SDL2 as a static
+iOS library, then builds the app with CMake (platforms/iOS.cmake, Xcode generator).
+Info.plist here enables the Files app (UIFileSharingEnabled / LSSupportsOpeningDocumentsInPlace).
+No game data is bundled: copy your own Data.rsdk into the app's folder
+(Files app > On My iPhone > RSDKv4+) and relaunch.

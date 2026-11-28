@@ -166,7 +166,6 @@ if(COMPILE_VORBIS)
     set(OGG_DIR dependencies/${DEP_PATH}/libogg)
     add_library(libvorbis STATIC
         ${VORBIS_DIR}/lib/analysis.c
-        ${VORBIS_DIR}/lib/barkmel.c
         ${VORBIS_DIR}/lib/bitrate.c
         ${VORBIS_DIR}/lib/block.c
         ${VORBIS_DIR}/lib/codebook.c
@@ -185,7 +184,6 @@ if(COMPILE_VORBIS)
         ${VORBIS_DIR}/lib/sharedbook.c
         ${VORBIS_DIR}/lib/smallft.c
         ${VORBIS_DIR}/lib/synthesis.c
-        ${VORBIS_DIR}/lib/tone.c
         ${VORBIS_DIR}/lib/vorbisenc.c
         ${VORBIS_DIR}/lib/vorbisfile.c
         ${VORBIS_DIR}/lib/window.c
