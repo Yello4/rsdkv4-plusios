@@ -7,6 +7,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main, fix-ios-ipa]
+    tags: ['ios-v*']
     paths:
       - RSDKv4/**
       - dependencies/ios/**
@@ -23,6 +24,9 @@ env:
   VORBIS_VERSION: "1.3.7"
   THEORA_VERSION: "1.1.1"
   IOS_DEPLOYMENT_TARGET: "13.0"
+
+permissions:
+  contents: write
 
 jobs:
   build-ios:
@@ -126,6 +130,19 @@ jobs:
           name: RSDKv4-iOS-unsigned-ipa
           path: RSDKv4.ipa
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/ios-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: RSDKv4.ipa
+          name: RSDKv4+ iOS ${{ github.ref_name }}
+          prerelease: true
+          body: |
+            Unsigned iOS build of RSDKv4+ for sideloading.
+            1. Download RSDKv4.ipa and install it with AltStore, SideStore or Sideloadly.
+            2. Open the app once, then in Files go to On My iPhone > RSDKv4+.
+            3. Copy in your own Data.rsdk (no game data is included) and reopen the app.
 
       - name: Upload build log
         if: always()
