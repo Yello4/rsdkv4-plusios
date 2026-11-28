@@ -82,7 +82,8 @@ bool getControllerButton(byte buttonID, int deviceID);
 #endif
 
 #elif defined __APPLE__
-#if __IPHONEOS__
+#include <TargetConditionals.h>
+#if TARGET_OS_IPHONE || defined(__IPHONEOS__)
 #define RETRO_PLATFORM   (RETRO_iOS)
 #define RETRO_DEVICETYPE (RETRO_MOBILE)
 #else
@@ -119,7 +120,7 @@ bool getControllerButton(byte buttonID, int deviceID);
 #endif
 
 #if RETRO_PLATFORM == RETRO_WIN || RETRO_PLATFORM == RETRO_OSX || RETRO_PLATFORM == RETRO_LINUX || RETRO_PLATFORM == RETRO_UWP                       \
-    || RETRO_PLATFORM == RETRO_ANDROID || RETRO_PLATFORM == RETRO_SWITCH
+    || RETRO_PLATFORM == RETRO_ANDROID || RETRO_PLATFORM == RETRO_SWITCH || RETRO_PLATFORM == RETRO_iOS
 #ifdef RETRO_USE_SDL2
 #define RETRO_USING_SDL1 (0)
 #define RETRO_USING_SDL2 (1)
@@ -206,6 +207,30 @@ bool getControllerButton(byte buttonID, int deviceID);
 #define GL_FRAMEBUFFER         GL_FRAMEBUFFER_EXT
 #define GL_COLOR_ATTACHMENT0   GL_COLOR_ATTACHMENT0_EXT
 #define GL_FRAMEBUFFER_BINDING GL_FRAMEBUFFER_BINDING_EXT
+#elif RETRO_PLATFORM == RETRO_iOS
+// OpenGL ES 1.1 (deprecated by Apple but still supported), same fixed-function path the Android port uses
+#define GLES_SILENCE_DEPRECATION
+
+#include <OpenGLES/ES1/gl.h>
+#include <OpenGLES/ES1/glext.h>
+
+#undef glGenFramebuffers
+#undef glBindFramebuffer
+#undef glFramebufferTexture2D
+#undef glDeleteFramebuffers
+
+#undef GL_FRAMEBUFFER
+#undef GL_COLOR_ATTACHMENT0
+#undef GL_FRAMEBUFFER_BINDING
+
+#define glGenFramebuffers      glGenFramebuffersOES
+#define glBindFramebuffer      glBindFramebufferOES
+#define glFramebufferTexture2D glFramebufferTexture2DOES
+#define glDeleteFramebuffers   glDeleteFramebuffersOES
+
+#define GL_FRAMEBUFFER         GL_FRAMEBUFFER_OES
+#define GL_COLOR_ATTACHMENT0   GL_COLOR_ATTACHMENT0_OES
+#define GL_FRAMEBUFFER_BINDING GL_FRAMEBUFFER_BINDING_OES
 #elif RETRO_PLATFORM == RETRO_SWITCH
 #include <GLES/gl.h>
 #include <EGL/egl.h>
@@ -335,6 +360,23 @@ enum RetroGameType {
 #include <Vorbis/vorbisfile.h>
 
 #include "cocoaHelpers.hpp"
+
+#elif RETRO_PLATFORM == RETRO_iOS
+#include <SDL.h>
+#include <vorbis/vorbisfile.h>
+
+// The app's Documents folder (visible in the Files app). Data.rsdk, settings, saves & mods live here.
+const char *getDocumentsPath();
+// Documents/log.txt, always written on iOS
+void iOSLog(const char *msg, ...);
+void iOSLogWrite(const char *text);
+// popup message (UIAlert through SDL)
+void iOSShowMessage(const char *title, const char *message);
+// case-insensitive lookup of the data pack inside Documents; returns a path relative to Documents
+bool iOSFindDataPack(const char *wantedName, char *out, size_t outSize);
+// 0 = can't open, 1 = RSDKv4 pack, 2 = RSDKv5 pack (Origins/Mania), 3 = not a data pack
+int iOSCheckDataPack(const char *path);
+bool iOSFolderExists(const char *relPath);
 
 #elif RETRO_USING_SDL2
 #include <SDL2/SDL.h>

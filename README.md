@@ -1,5 +1,9 @@
 ![](header.png?raw=true)
 
+> ### 📱 Want to play on iPhone or iPad? → [**Read the iOS guide**](docs/iOS-GUIDE.md)
+> Download `RSDKv4.ipa` from the [Releases page](https://github.com/Yello4/rsdkv4-plusios/releases), install it with Sideloadly or AltStore (no Mac needed), then add your own Sonic 1 or Sonic 2 (2013 mobile) `Data.rsdk`. No game data is included, and Sonic Origins data won't work.
+
+
 A complete decompilation of Retro Engine v4 and the menus from Sonic 1 and 2 (2013).
 
 This project is a fork of RSDKv4, which was used to develop the mobile remakes of Sonic 1 and 2 (2013) and aims to improve many already existing functions and add a big variety of new ones.

@@ -335,7 +335,12 @@ void InitUserdata()
         ini.SetBool("Dev", "DevMenu", Engine.devMenu = false);
         ini.SetBool("Dev", "EngineDebugMode", engineDebugMode = false);
         ini.SetBool("Dev", "FrameProcessTime", Engine.frameProcessTime = false);
+#if RETRO_PLATFORM == RETRO_iOS
+        // iOS players use the mobile Data.rsdk, which ships compiled bytecode and no .txt scripts
+        ini.SetBool("Dev", "TxtScripts", forceUseScripts = false);
+#else
         ini.SetBool("Dev", "TxtScripts", forceUseScripts = true);
+#endif
         forceUseScripts_Config = forceUseScripts;
         ini.SetInteger("Dev", "StartingCategory", Engine.startList = 255);
         ini.SetInteger("Dev", "StartingScene", Engine.startStage = 255);

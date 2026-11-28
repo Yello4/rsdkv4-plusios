@@ -162,6 +162,25 @@ bool ProcessEvents()
                     Engine.message = MESSAGE_LOSTFOCUS;
 #endif
                 Engine.hasFocus = false;
+#if RETRO_PLATFORM == RETRO_iOS
+                {
+                    // iOS kills apps that draw with OpenGL while in the background, so stop here until we're back.
+                    PrintLog("App going to the background, pausing");
+                    bool soundWasPlaying = PauseSound();
+                    SDL_Event bgEvent;
+                    bool waiting = true;
+                    while (waiting && SDL_WaitEvent(&bgEvent)) {
+                        if (bgEvent.type == SDL_APP_DIDENTERFOREGROUND)
+                            waiting = false;
+                        else if (bgEvent.type == SDL_APP_TERMINATING || bgEvent.type == SDL_QUIT)
+                            return false;
+                    }
+                    if (soundWasPlaying)
+                        ResumeSound();
+                    Engine.hasFocus = true;
+                    PrintLog("App back in the foreground");
+                }
+#endif
                 break;
             case SDL_APP_WILLENTERFOREGROUND: Engine.hasFocus = true; break;
             case SDL_APP_TERMINATING: return false;
@@ -432,12 +451,34 @@ void RetroEngine::Init()
     StrCopy(dest, gamePath);
     StrAdd(dest, Engine.dataFile[0]);
     disableFocusPause = 3; // focus pause is ALWAYS enabled.
+#elif RETRO_PLATFORM == RETRO_iOS
+    // The Files app doesn't care about upper/lower case but the iPhone's file system does,
+    // so find "Data.rsdk" whatever its capitalisation (or a single .rsdk file, or one folder down).
+    int iosPackState = 0;
+    {
+        if (!Engine.dataFile[0][0])
+            StrCopy(Engine.dataFile[0], "Data.rsdk");
+        char found[0x100];
+        if (iOSFindDataPack(Engine.dataFile[0], found, sizeof(found))) {
+            StrCopy(dest, found);
+            iosPackState = iOSCheckDataPack(found);
+            iOSLog("Data pack: found '%s' (looked for '%s'), type check = %d", found, Engine.dataFile[0], iosPackState);
+        }
+        else {
+            StrCopy(dest, BASE_PATH);
+            StrAdd(dest, Engine.dataFile[0]);
+            iOSLog("Data pack: '%s' NOT found in the app folder", Engine.dataFile[0]);
+        }
+    }
 #else
 
     StrCopy(dest, BASE_PATH);
     StrAdd(dest, Engine.dataFile[0]);
 #endif
-    CheckRSDKFile(dest);
+    bool mainPackLoaded = CheckRSDKFile(dest);
+#if RETRO_PLATFORM == RETRO_iOS
+    iOSLog("Data pack loaded: %s, compiled bytecode inside: %s", mainPackLoaded ? "yes" : "no", Engine.usingBytecode ? "yes" : "no");
+#endif
 #else
     CheckRSDKFile("Data.rsdk");
 #endif
@@ -445,10 +486,55 @@ void RetroEngine::Init()
 #if !RETRO_USE_ORIGINAL_CODE
     for (int i = 1; i < RETRO_PACK_COUNT; ++i) {
         if (!StrComp(Engine.dataFile[i], "")) {
+#if RETRO_PLATFORM == RETRO_iOS
+            char found[0x100];
+            if (!iOSFindDataPack(Engine.dataFile[i], found, sizeof(found)))
+                continue; // optional extra packs (Data2.rsdk...): skip quietly when they aren't there
+            StrCopy(dest, found);
+#else
             StrCopy(dest, BASE_PATH);
             StrAdd(dest, Engine.dataFile[i]);
+#endif
             CheckRSDKFile(dest);
         }
+    }
+#endif
+
+#if RETRO_PLATFORM == RETRO_iOS
+    // "TxtScripts" (load .txt scripts instead of the compiled bytecode) needs a Scripts folder that the mobile
+    // Data.rsdk doesn't have. With it on and no scripts, every object loads empty: black screen / nothing works.
+    if (forceUseScripts) {
+        bool haveScripts = iOSFolderExists("Scripts") || iOSFolderExists("Data/Scripts");
+        if (!haveScripts && Engine.usingBytecode) {
+            iOSLog("TxtScripts was on but there is no Scripts folder: using the bytecode in the data pack instead");
+            forceUseScripts        = false;
+            forceUseScripts_Config = false;
+        }
+        else {
+            iOSLog("TxtScripts is on (Scripts folder found: %s)", haveScripts ? "yes" : "no");
+        }
+    }
+
+    if (!mainPackLoaded && !iOSFolderExists("Data/Game")) {
+        char msg[0x600];
+        if (iosPackState == 2) {
+            snprintf(msg, sizeof(msg),
+                     "The file '%s' is an RSDKv5 data pack (from Sonic Origins or Sonic Mania). This app is RSDKv4 and needs the Data.rsdk "
+                     "from the 2013 mobile version of Sonic 1 or Sonic 2.",
+                     dest);
+        }
+        else if (iosPackState == 3) {
+            snprintf(msg, sizeof(msg),
+                     "The file '%s' isn't a Retro Engine v4 data pack (it may be damaged, still downloading, or a zip file that needs "
+                     "unzipping). Use the Data.rsdk from the 2013 mobile version of Sonic 1 or Sonic 2.",
+                     dest);
+        }
+        else {
+            snprintf(msg, sizeof(msg),
+                     "No game data found.\n\nOpen the Files app, go to On My iPhone > RSDKv4+ and copy your own Data.rsdk there "
+                     "(exact name: Data.rsdk). Then close this app completely and open it again.\n\nA log.txt is saved in the same folder.");
+        }
+        iOSShowMessage("RSDKv4+: game data needed", msg);
     }
 #endif
 
@@ -459,8 +545,9 @@ void RetroEngine::Init()
 #endif
     SaveGame *saveGame = (SaveGame *)saveRAM;
 
-    if (LoadGameConfig("Data/Game/GameConfig.bin")) {
-        if (InitRenderDevice()) {
+    bool configLoaded = false, renderReady = false;
+    if ((configLoaded = LoadGameConfig("Data/Game/GameConfig.bin"))) {
+        if ((renderReady = InitRenderDevice())) {
             if (InitAudioPlayback()) {
                 InitFirstStage();
                 ClearScriptData();
@@ -537,6 +624,24 @@ void RetroEngine::Init()
             }
         }
     }
+
+#if RETRO_PLATFORM == RETRO_iOS
+    iOSLog("GameConfig loaded: %s, game: '%s', video/GL ready: %s", configLoaded ? "yes" : "no", gameWindowText, renderReady ? "yes" : "no");
+    if (Engine.usingDataFile_Config || iOSFolderExists("Data/Game")) {
+        if (!configLoaded) {
+            iOSShowMessage("RSDKv4+: can't read the game data",
+                           "Data.rsdk was found but Data/Game/GameConfig.bin couldn't be read from it. Make sure it's the Data.rsdk from the "
+                           "2013 mobile Sonic 1 or Sonic 2 (Sonic Origins data won't work) and that it copied completely. See log.txt in the "
+                           "app folder.");
+        }
+        else if (!renderReady) {
+            char msg[0x300];
+            snprintf(msg, sizeof(msg), "The game data loaded, but the screen couldn't be set up (%s). Please send log.txt from the app folder.",
+                     SDL_GetError());
+            iOSShowMessage("RSDKv4+: video error", msg);
+        }
+    }
+#endif
 
 #if !RETRO_USE_ORIGINAL_CODE
     gameType = GAME_UNKNOWN;
